@@ -131,6 +131,4 @@ npm run dev
 - Clerk redirects: Make sure the route envs match the app paths listed above.
 - Windows/OpenSSL + Postgres: use an SSL connection string (`sslmode=require`) with Neon.
 
-## License
 
-This project is provided as-is for educational purposes.
