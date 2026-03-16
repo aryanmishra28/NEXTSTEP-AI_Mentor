@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import Link from "next/link";
 import {
   BarChart,
   Bar,
@@ -16,6 +17,8 @@ import {
   TrendingUp,
   TrendingDown,
   Brain,
+  FileSearch,
+  ArrowRight,
 } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import {
@@ -27,8 +30,9 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { Button } from "@/components/ui/button";
 
-const DashboardView = ({ insights }) => {
+const DashboardView = ({ insights, resumeAnalysis }) => {
   // Transform salary data for the chart
   const salaryData = insights.salaryRanges.map((range) => ({
     name: range.role,
@@ -221,6 +225,71 @@ const DashboardView = ({ insights }) => {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div className="space-y-1">
+            <CardTitle className="flex items-center gap-2">
+              <FileSearch className="h-5 w-5" />
+              Resume Analysis Snapshot
+            </CardTitle>
+            <CardDescription>
+              Track ATS readiness and skill alignment from your latest report.
+            </CardDescription>
+          </div>
+          <Button asChild>
+            <Link href="/resume-analysis">
+              Open Analyzer
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {resumeAnalysis?.latest ? (
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="rounded-xl border p-4">
+                <p className="text-sm text-muted-foreground">ATS Score</p>
+                <p className="text-3xl font-bold mt-1">
+                  {resumeAnalysis.latest.resumeAnalysis.score}%
+                </p>
+                <Progress
+                  value={resumeAnalysis.latest.resumeAnalysis.score}
+                  className="mt-3"
+                />
+              </div>
+              <div className="rounded-xl border p-4">
+                <p className="text-sm text-muted-foreground">Skill Alignment</p>
+                <p className="text-3xl font-bold mt-1">
+                  {resumeAnalysis.latest.skillGapAnalysis.alignmentScore}%
+                </p>
+                <Progress
+                  value={resumeAnalysis.latest.skillGapAnalysis.alignmentScore}
+                  className="mt-3"
+                />
+              </div>
+              <div className="rounded-xl border p-4">
+                <p className="text-sm text-muted-foreground">Critical Gaps</p>
+                <p className="text-3xl font-bold mt-1">
+                  {
+                    resumeAnalysis.latest.skillGapAnalysis.missingCriticalSkills
+                      .length
+                  }
+                </p>
+                <p className="text-xs text-muted-foreground mt-3">
+                  {resumeAnalysis.latest.resumeAnalysis.overallVerdict}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-dashed p-6">
+              <p className="text-sm text-muted-foreground">
+                Run your first resume analysis to see ATS score and skill-gap
+                progress directly on your dashboard.
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 };

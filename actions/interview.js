@@ -4,7 +4,68 @@ import { db } from "@/lib/prisma";
 import { auth } from "@clerk/nextjs/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-export async function generateQuiz() {
+const INTERVIEW_MODE = {
+  STANDARD: "standard",
+  WEAK_AREAS: "weak-areas",
+};
+
+const HOT_TOPIC_MAP = {
+  "gen-ai": "Generative AI and LLM systems",
+  nextjs: "Next.js",
+  react: "React",
+  javascript: "JavaScript",
+  os: "Operating Systems",
+  dbms: "DBMS and SQL databases",
+};
+
+const buildStandardPrompt = (user) => `
+    Generate 10 technical interview questions for a ${user.industry
+    } professional${user.skills?.length ? ` with expertise in ${user.skills.join(", ")}` : ""
+  }.
+
+    Each question should be multiple choice with 4 options.
+
+    Return the response in this JSON format only, no additional text:
+    {
+      "questions": [
+        {
+          "question": "string",
+          "options": ["string", "string", "string", "string"],
+          "correctAnswer": "string",
+          "explanation": "string"
+        }
+      ]
+    }
+  `;
+
+const buildWeakAreasPrompt = ({ user, weakAreas }) => `
+    Generate 10 technical interview questions for a ${user.industry || "general technology"
+  } professional${user.skills?.length ? ` with expertise in ${user.skills.join(", ")}` : ""
+  }.
+
+    The quiz must focus on these weak areas discovered from previous mistakes:
+    ${weakAreas}
+
+    Requirements:
+    - Target concepts the user previously missed.
+    - Keep the questions practical and role-relevant.
+    - Include a spread from foundational to intermediate difficulty.
+    - Each question must be multiple choice with exactly 4 options.
+
+    Return the response in this JSON format only, no additional text:
+    {
+      "questions": [
+        {
+          "question": "string",
+          "options": ["string", "string", "string", "string"],
+          "correctAnswer": "string",
+          "explanation": "string"
+        }
+      ]
+    }
+  `;
+
+export async function generateQuiz(options = {}) {
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
   const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
 
@@ -21,25 +82,37 @@ export async function generateQuiz() {
 
   if (!user) throw new Error("User not found");
 
-  const prompt = `
-    Generate 10 technical interview questions for a ${user.industry
-    } professional${user.skills?.length ? ` with expertise in ${user.skills.join(", ")}` : ""
-    }.
-    
-    Each question should be multiple choice with 4 options.
-    
-    Return the response in this JSON format only, no additional text:
-    {
-      "questions": [
-        {
-          "question": "string",
-          "options": ["string", "string", "string", "string"],
-          "correctAnswer": "string",
-          "explanation": "string"
-        }
-      ]
+  let prompt = buildStandardPrompt(user);
+  let mode = INTERVIEW_MODE.STANDARD;
+
+  if (options?.mode === INTERVIEW_MODE.WEAK_AREAS) {
+    const previousAssessments = await db.assessment.findMany({
+      where: {
+        userId: user.id,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+      take: 5,
+    });
+
+    const weakQuestionSummaries = previousAssessments
+      .flatMap((assessment) => assessment.questions || [])
+      .filter((item) => !item.isCorrect)
+      .slice(0, 12)
+      .map(
+        (item) =>
+          `Question: ${item.question}\nCorrect answer: ${item.answer}\nExplanation: ${item.explanation}`
+      );
+
+    if (weakQuestionSummaries.length > 0) {
+      mode = INTERVIEW_MODE.WEAK_AREAS;
+      prompt = buildWeakAreasPrompt({
+        user,
+        weakAreas: weakQuestionSummaries.join("\n\n"),
+      });
     }
-  `;
+  }
 
   try {
     const result = await model.generateContent(prompt);
@@ -48,14 +121,21 @@ export async function generateQuiz() {
     const cleanedText = text.replace(/```(?:json)?\n?/g, "").trim();
     const quiz = JSON.parse(cleanedText);
 
-    return quiz.questions;
+    return {
+      mode,
+      title:
+        mode === INTERVIEW_MODE.WEAK_AREAS
+          ? "Weak Areas Practice"
+          : "Technical Quiz",
+      questions: quiz.questions,
+    };
   } catch (error) {
     console.error("Error generating quiz:", error);
     throw new Error("Failed to generate quiz questions");
   }
 }
 
-export async function saveQuizResult(questions, answers, score) {
+export async function saveQuizResult(questions, answers, score, metadata = {}) {
   const { userId } = await auth();
   if (!userId) throw new Error("Unauthorized");
 
@@ -116,7 +196,10 @@ export async function saveQuizResult(questions, answers, score) {
         userId: user.id,
         quizScore: score,
         questions: questionResults,
-        category: "Technical",
+        category:
+          metadata?.mode === INTERVIEW_MODE.WEAK_AREAS
+            ? "Technical - Weak Areas"
+            : "Technical",
         improvementTip,
       },
     });
@@ -152,5 +235,92 @@ export async function getAssessments() {
   } catch (error) {
     console.error("Error fetching assessments:", error);
     throw new Error("Failed to fetch assessments");
+  }
+}
+
+export async function generateHotTopicQA({
+  topic,
+  difficulty = "medium",
+  count = 6,
+} = {}) {
+  const { userId } = await auth();
+  if (!userId) throw new Error("Unauthorized");
+
+  const normalizedTopic = String(topic || "").trim();
+  if (!normalizedTopic || !HOT_TOPIC_MAP[normalizedTopic]) {
+    throw new Error("Invalid topic selected");
+  }
+
+  const normalizedDifficulty = ["easy", "medium", "hard"].includes(
+    String(difficulty).toLowerCase()
+  )
+    ? String(difficulty).toLowerCase()
+    : "medium";
+
+  const questionCount = Math.max(3, Math.min(12, Number(count) || 6));
+
+  const user = await db.user.findUnique({
+    where: { clerkUserId: userId },
+    select: {
+      industry: true,
+      skills: true,
+    },
+  });
+
+  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+  const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
+
+  const prompt = `
+    Generate ${questionCount} interview study Q&A pairs for topic: ${
+    HOT_TOPIC_MAP[normalizedTopic]
+  }.
+    Difficulty: ${normalizedDifficulty}.
+    Candidate context: industry=${user?.industry || "general"}, skills=${
+    user?.skills?.join(", ") || "not specified"
+  }.
+
+    Requirements:
+    - Provide practical interview-focused questions.
+    - Provide concise but clear answers (3-6 lines each).
+    - Keep answers technically accurate and suitable for revision.
+    - Return ONLY JSON in the exact format below.
+
+    {
+      "qa": [
+        {
+          "question": "string",
+          "answer": "string"
+        }
+      ]
+    }
+  `;
+
+  try {
+    const result = await model.generateContent(prompt);
+    const text = result.response.text();
+    const cleanedText = text.replace(/```(?:json)?\n?/g, "").trim();
+    const parsed = JSON.parse(cleanedText);
+
+    const qa = (parsed?.qa || [])
+      .map((item) => ({
+        question: String(item?.question || "").trim(),
+        answer: String(item?.answer || "").trim(),
+      }))
+      .filter((item) => item.question && item.answer)
+      .slice(0, questionCount);
+
+    if (!qa.length) {
+      throw new Error("No valid Q&A returned");
+    }
+
+    return {
+      topic: normalizedTopic,
+      difficulty: normalizedDifficulty,
+      count: qa.length,
+      qa,
+    };
+  } catch (error) {
+    console.error("Error generating hot topic Q&A:", error);
+    throw new Error("Failed to generate random Q&A");
   }
 }

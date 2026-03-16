@@ -21,6 +21,7 @@ export default function Quiz() {
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [answers, setAnswers] = useState([]);
   const [showExplanation, setShowExplanation] = useState(false);
+  const [quizMode, setQuizMode] = useState("standard");
 
   const {
     loading: generatingQuiz,
@@ -36,8 +37,8 @@ export default function Quiz() {
   } = useFetch(saveQuizResult);
 
   useEffect(() => {
-    if (quizData) {
-      setAnswers(new Array(quizData.length).fill(null));
+    if (quizData?.questions) {
+      setAnswers(new Array(quizData.questions.length).fill(null));
     }
   }, [quizData]);
 
@@ -48,7 +49,7 @@ export default function Quiz() {
   };
 
   const handleNext = () => {
-    if (currentQuestion < quizData.length - 1) {
+    if (currentQuestion < quizData.questions.length - 1) {
       setCurrentQuestion(currentQuestion + 1);
       setShowExplanation(false);
     } else {
@@ -59,17 +60,19 @@ export default function Quiz() {
   const calculateScore = () => {
     let correct = 0;
     answers.forEach((answer, index) => {
-      if (answer === quizData[index].correctAnswer) {
+      if (answer === quizData.questions[index].correctAnswer) {
         correct++;
       }
     });
-    return (correct / quizData.length) * 100;
+    return (correct / quizData.questions.length) * 100;
   };
 
   const finishQuiz = async () => {
     const score = calculateScore();
     try {
-      await saveQuizResultFn(quizData, answers, score);
+      await saveQuizResultFn(quizData.questions, answers, score, {
+        mode: quizData.mode,
+      });
       toast.success("Quiz completed!");
     } catch (error) {
       toast.error(error.message || "Failed to save quiz results");
@@ -80,7 +83,7 @@ export default function Quiz() {
     setCurrentQuestion(0);
     setAnswers([]);
     setShowExplanation(false);
-    generateQuizFn();
+    generateQuizFn({ mode: quizMode });
     setResultData(null);
   };
 
@@ -105,26 +108,42 @@ export default function Quiz() {
         </CardHeader>
         <CardContent>
           <p className="text-muted-foreground">
-            This quiz contains 10 questions specific to your industry and
-            skills. Take your time and choose the best answer for each question.
+            Choose a standard technical round or practice only the areas where
+            you performed weakly in previous quizzes.
           </p>
         </CardContent>
-        <CardFooter>
-          <Button onClick={generateQuizFn} className="w-full">
-            Start Quiz
+        <CardFooter className="flex flex-col gap-3 md:flex-row">
+          <Button
+            onClick={() => {
+              setQuizMode("standard");
+              generateQuizFn({ mode: "standard" });
+            }}
+            className="w-full"
+          >
+            Start Standard Quiz
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setQuizMode("weak-areas");
+              generateQuizFn({ mode: "weak-areas" });
+            }}
+            className="w-full"
+          >
+            Practice Weak Areas
           </Button>
         </CardFooter>
       </Card>
     );
   }
 
-  const question = quizData[currentQuestion];
+  const question = quizData.questions[currentQuestion];
 
   return (
     <Card className="mx-2">
       <CardHeader>
         <CardTitle>
-          Question {currentQuestion + 1} of {quizData.length}
+          {quizData.title}: Question {currentQuestion + 1} of {quizData.questions.length}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -167,7 +186,7 @@ export default function Quiz() {
           {savingResult && (
             <BarLoader className="mt-4" width={"100%"} color="gray" />
           )}
-          {currentQuestion < quizData.length - 1
+          {currentQuestion < quizData.questions.length - 1
             ? "Next Question"
             : "Finish Quiz"}
         </Button>
