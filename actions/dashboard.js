@@ -7,6 +7,24 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
 
+const toDemandLevel = (value) => {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (["HIGH", "MEDIUM", "LOW"].includes(normalized)) return normalized;
+  return "MEDIUM";
+};
+
+const toMarketOutlook = (value) => {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (["POSITIVE", "NEUTRAL", "NEGATIVE"].includes(normalized)) return normalized;
+  return "NEUTRAL";
+};
+
+const toGrowthRate = (value) => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const parsed = Number.parseFloat(String(value || "").replace("%", ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
 export const generateAIInsights = async (industry) => {
   const prompt = `
           Analyze the current state of the ${industry} industry and provide insights in ONLY the following JSON format without any additional notes or explanations:
@@ -32,8 +50,14 @@ export const generateAIInsights = async (industry) => {
   const response = result.response;
   const text = response.text();
   const cleanedText = text.replace(/```(?:json)?\n?/g, "").trim();
+  const parsed = JSON.parse(cleanedText);
 
-  return JSON.parse(cleanedText);
+  return {
+    ...parsed,
+    demandLevel: toDemandLevel(parsed?.demandLevel),
+    marketOutlook: toMarketOutlook(parsed?.marketOutlook),
+    growthRate: toGrowthRate(parsed?.growthRate),
+  };
 };
 
 export async function getIndustryInsights() {

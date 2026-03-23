@@ -16,30 +16,54 @@ export async function updateUser(data) {
   if (!user) throw new Error("User not found");
 
   try {
-    // Start a transaction to handle both operations
+    // Do any slow external work before opening the transaction.
+    const existingIndustryInsight = await db.industryInsight.findUnique({
+      where: {
+        industry: data.industry,
+      },
+    });
+
+    let generatedInsights = null;
+    if (!existingIndustryInsight) {
+      generatedInsights = await generateAIInsights(data.industry);
+    }
+
+    // Keep the transaction focused on short DB operations only.
     const result = await db.$transaction(
       async (tx) => {
-        // First check if industry exists
         let industryInsight = await tx.industryInsight.findUnique({
           where: {
             industry: data.industry,
           },
         });
 
-        // If industry doesn't exist, create it with default values
         if (!industryInsight) {
-          const insights = await generateAIInsights(data.industry);
+          if (!generatedInsights) {
+            throw new Error("Industry insights changed during update, please retry");
+          }
 
-          industryInsight = await tx.industryInsight.create({
-            data: {
-              industry: data.industry,
-              ...insights,
-              nextUpdate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-            },
-          });
+          try {
+            industryInsight = await tx.industryInsight.create({
+              data: {
+                industry: data.industry,
+                ...generatedInsights,
+                nextUpdate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+              },
+            });
+          } catch (error) {
+            // Handle races where another request created the same industry first.
+            if (error?.code === "P2002") {
+              industryInsight = await tx.industryInsight.findUnique({
+                where: {
+                  industry: data.industry,
+                },
+              });
+            } else {
+              throw error;
+            }
+          }
         }
 
-        // Now update the user
         const updatedUser = await tx.user.update({
           where: {
             id: user.id,
@@ -53,9 +77,6 @@ export async function updateUser(data) {
         });
 
         return { updatedUser, industryInsight };
-      },
-      {
-        timeout: 10000, // default: 5000
       }
     );
 

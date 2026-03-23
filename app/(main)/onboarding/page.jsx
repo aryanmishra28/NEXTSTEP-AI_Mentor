@@ -4,16 +4,19 @@ import OnboardingForm from "./_components/onboarding-form";
 import { getUserOnboardingStatus } from "@/actions/user";
 
 export default async function OnboardingPage() {
+  let isOnboarded = false;
+
   try {
     // Check if user is already onboarded
-    const { isOnboarded } = await getUserOnboardingStatus();
-
-    if (isOnboarded) {
-      redirect("/dashboard");
-    }
+    const status = await getUserOnboardingStatus();
+    isOnboarded = status.isOnboarded;
   } catch (error) {
     console.error("Error in onboarding page:", error);
     // Continue to onboarding form even if there's an error
+  }
+
+  if (isOnboarded) {
+    redirect("/dashboard");
   }
 
   return (
